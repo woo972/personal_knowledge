@@ -1,0 +1,68 @@
+services:
+  app:
+    command: bash -c "exec catalina.sh run >> /pang/logs/tomcat/catalina_log/catalina.out 2>&1"
+    env_file: /cou/conf/env.conf
+    environment:
+      - JVM_MEMORY=-Xms7g -Xmx7g -XX:MetaspaceSize=256m
+      - SPRING_PROFILE="production"
+      - CMDB_OPTS=-Dcmdb.service="modular_front" -Dcmdb.role="modular_list" -Dloging.kafka.production=true
+      - CMDB_ROLE=modular_list
+      - PINPOINT_ENABLED=true
+      - ZONE=prod
+    healthcheck:
+      interval: 30s
+      retries: 15
+      test:
+        - CMD
+        - curl
+        - -f
+        - http://localhost:10001/hello
+      timeout: 1s
+    images: docker-hub.coupang.net/release/modular_list/tomcat:20210416161558
+    ports:
+      - 10001:10001
+      - 11619:11619
+    volumes:
+      - /pang/logs/tomcat:/pang/logs/tomcat
+      - /pang/logs/tomcat/gc:/pang/logs/tomcat/gc
+      - /pang/logs/tomcat/catalina_log:/pang/logs/tomcat/catalina_log
+    volumes_from:
+      - container:secrets:ro
+  logstash:
+    env_file: /cou/conf/env.conf
+    environment:
+      - ROLE=modular_list
+      - SERVICE=modular_front
+    image: docker-hub.coupang.net/release/modular_list/logstash:20210416161558
+    volumes:
+      - /pang/logs/logstash:/pang/logs/logstash
+    volumes_from:
+      - nginx:ro
+  nginx:
+    depens_on:
+      app:
+        condition: service_healthy
+      warmer:
+        condition: service_healthy
+     env_file: /cou/conf/env.conf
+     image: docker-hub.coupang.net/release/modular_list/nginx:20210416161558
+     links:
+       - app:app
+     ports:
+       - 80:80
+       - 443:443
+     volumes:
+       - /pang/logs/nginx:/pang/logs/nginx
+     volumes_from:
+       - container:secrets:ro
+   warmer:
+     depends_on:
+       app:
+         container: service_healthy
+     env_file: /cou/conf/env.conf
+     environment:
+       - ROLE=modular_list
+     image: docker-hub.coupang.net/release/warmer:1.1
+     volumes:
+       - /pang/logs/warmer:/pang/logs/warmer
+version: '2.1'

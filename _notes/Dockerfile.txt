@@ -1,0 +1,50 @@
+# nginx
+FROM docker-hub.coupang.net/nginx:1.8.1
+ADD files/ /pang/program/nginx/conf
+VOLUME ["/pang/logs/nginx"]
+# logstash
+FROM docker-hub.coupang.net/logstash:2.4.1
+ADD conf /pang/conf/logstash
+ADD confd /etc/confd
+ADD scripts /pang/scripts/confd/
+RUN chmod u+x /pang/scripts/confd/confd-wrapper
+RUN /bin/bash -c 'logstash-plugin install --no-verify logstash-output-file'
+VOLUME ["/pang/logs/logstash"]
+ENTRYPOINT ["/pang/scripts/confd/confd-wrapper"]
+CMD ["agent"]
+
+# interface
+FROM docker-hub.coupang.net/release/pinpont/1.8.4/tomcat:8.0.35-jdk8
+RUN apk-install curl
+ADD setenv.sh ${CATALINA_HOME}/bin/setenv.sh
+ADD server.xml ${CATALINA_HOME}/conf/server.xml
+COPY build/libs/*.war "${CATALINA_HOME}"/webapps/ROOT.war
+EXPOSE 1001
+VOLUME ["/pang/logs/tomcat", "/pang/logs/tomcat/catalina_log", "/pang/logs/tomcat/gc"]
+CMD ["/bin/bash", "-c", "source setnenv.sh && exec catalina.sh run >> /pang/logs/tomcat/catalina_log/catalina.out 2>&1"]
+
+
+## setenv.sh
+#!/usr/bin/env bash
+HOST_NAME=${HOST_NAME:-`curl http://xxx.xxx.xxx.xxx/latest/meta-data/instance-id`}
+HOST_IP=${HOST_IP:-`curl http://xxx.xxx.xxx.xxx/latest/meta-data/local-ipv4`}
+TOMCA_LOG_PATH=/pang/logs/tomcat
+source ${CATALINA_HOME}/bin/pinpoint/sh
+CATALINA_OPTS="$CATALINA_OPTS \
+	-server \
+	-Dspring.profiles.active="${SPRING_PROFILE}" \
+	-"${JVM_MEMORY}" \
+	- Dcom.sun.management.jmxremote \
+	- Dcom.sun.management.jmxremote.port=11619 \
+	- Dcom.sun.management.jmxremote.ssl=false \
+	- Dcom.sun.management.jmxremote.authenticate=false \
+	- Djava.rmi.server.hostname="${HOST_IP}" \
+	- Dcmdb.hostname="${HOST_NAME}" \
+	- "${CMDB_OPTS}" \
+	- Dcom.sun.mangement.jmxremote.rmi.port=11619 \
+	- XX:+UseG1Gc -XX:MaxGCPauseMillis=200 -XX:G1HeapRegionSize=8m -XX:+ParallelRefProcEnabled \
+	- XX:-ResizePLAB -XX:ParallelGCThreads=8 -XX:+UseThreadPriorties -XX:ThreadPriorityPolicy=42 \
+	- verbose:gc -Xloggc:${TOMCAT_LOG_PATH}/gc/gc.log
+	- XX:+PrintGCDetails -XX:+PrintGCDateStamps -XX:+UseGCLogFileRotation -XX:NumberOfGCLogFiles=14  
+	...
+	-XX:+PrintClassHistogramAfterFullGC"
